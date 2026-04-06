@@ -1,0 +1,92 @@
+Metadata-Version: 2.4
+Name: sshj
+Version: 0.1.0
+Summary: SSH bookmark manager with a Textual terminal UI
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: textual>=0.61.0
+
+# sshj
+
+`sshj` is a Python + Textual SSH bookmark manager.
+
+It gives you a terminal UI to manage bookmarks and a direct connect mode:
+
+- `sshj` opens the TUI app
+- `sshj <alias>` connects directly to a saved alias
+
+## Features
+
+- Bookmark fields:
+  - host/IP (required)
+  - port (optional)
+  - SSH key path (optional)
+  - alias (optional)
+  - description (optional)
+- Connect to a selected bookmark directly from the app
+- Direct alias connect from any terminal via `sshj <alias>`
+- JSON storage at `~/.sshj/bookmarks.json` (override with `SSHJ_BOOKMARKS`)
+
+## Install (editable)
+
+```bash
+cd /Users/jannisgunsche/PycharmProjects/sshj
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+After this, `sshj` is available while that environment is active.
+
+## Make `sshj` available in all terminals (source once in shell config)
+
+Add this line to your shell profile:
+
+- Zsh: `~/.zshrc`
+- Bash: `~/.bashrc`
+
+```bash
+source /Users/jannisgunsche/PycharmProjects/sshj/shell/sshj.sh
+```
+
+Then reload your shell config:
+
+```bash
+source ~/.zshrc
+```
+
+The sourced helper defines an `sshj` shell function that runs this project directly.
+It will use `/Users/jannisgunsche/PycharmProjects/sshj/.venv/bin/python` if present, otherwise `python3` from PATH.
+
+## Usage
+
+Open the app:
+
+```bash
+sshj
+```
+
+Inside the app:
+
+- `Ctrl+N` new bookmark
+- `Ctrl+S` save bookmark
+- `Ctrl+D` delete bookmark
+- `Ctrl+E` connect to the current form/bookmark
+- `q` quit
+
+Direct connect by alias:
+
+```bash
+sshj my-alias
+```
+
+List bookmarks:
+
+```bash
+sshj --list
+```
+
+## Notes
+
+- Alias is optional for saved entries, but required for `sshj <alias>` direct connect.
+- Host can be plain host/IP or `user@host`.

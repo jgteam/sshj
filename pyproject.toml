@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sshj"
+version = "0.1.0"
+description = "SSH bookmark manager with a Textual terminal UI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "textual>=0.61.0",
+]
+
+[project.scripts]
+sshj = "sshj.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
