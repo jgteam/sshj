@@ -88,4 +88,6 @@ def _render_bookmark(bookmark: Bookmark) -> str:
     alias = bookmark.alias or "(no alias)"
     port = f":{bookmark.port}" if bookmark.port else ""
     description = f" - {bookmark.description}" if bookmark.description else ""
+    if bookmark.is_tunnel and bookmark.tunnel_spec:
+        return f"[TUN] {alias}: {bookmark.tunnel_spec} via {bookmark.connection_target}{port}{description}"
     return f"{alias}: {bookmark.connection_target}{port}{description}"

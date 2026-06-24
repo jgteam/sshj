@@ -11,21 +11,20 @@ class Bookmark:
     key_path: str | None = None
     alias: str | None = None
     description: str | None = None
+    entry_type: str = "ssh"
+    local_bind_host: str | None = None
+    local_port: int | None = None
+    remote_host: str | None = None
+    remote_port: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "Bookmark":
         host = str(data.get("host", "")).strip()
         username = _optional_text(data.get("username"))
-        port = data.get("port")
         key_path = _optional_text(data.get("key_path"))
         alias = _optional_text(data.get("alias"))
         description = _optional_text(data.get("description"))
-
-        parsed_port: int | None
-        if port in (None, ""):
-            parsed_port = None
-        else:
-            parsed_port = int(port)
+        entry_type = _optional_text(data.get("entry_type")) or "ssh"
 
         if not host:
             raise ValueError("Bookmark host is required")
@@ -33,10 +32,15 @@ class Bookmark:
         return cls(
             host=host,
             username=username,
-            port=parsed_port,
+            port=_optional_int(data.get("port")),
             key_path=key_path,
             alias=alias,
             description=description,
+            entry_type=entry_type,
+            local_bind_host=_optional_text(data.get("local_bind_host")),
+            local_port=_optional_int(data.get("local_port")),
+            remote_host=_optional_text(data.get("remote_host")),
+            remote_port=_optional_int(data.get("remote_port")),
         )
 
     def to_dict(self) -> dict:
@@ -47,6 +51,11 @@ class Bookmark:
             "key_path": self.key_path,
             "alias": self.alias,
             "description": self.description,
+            "entry_type": self.entry_type,
+            "local_bind_host": self.local_bind_host,
+            "local_port": self.local_port,
+            "remote_host": self.remote_host,
+            "remote_port": self.remote_port,
         }
 
     @property
@@ -59,9 +68,30 @@ class Bookmark:
             return f"{self.username}@{self.host}"
         return self.host
 
+    @property
+    def is_tunnel(self) -> bool:
+        return self.entry_type == "tunnel"
+
+    @property
+    def tunnel_spec(self) -> str | None:
+        if not self.is_tunnel:
+            return None
+        if not self.local_bind_host or not self.local_port or not self.remote_host or not self.remote_port:
+            return None
+        return (
+            f"{self.local_bind_host}:{self.local_port}:"
+            f"{self.remote_host}:{self.remote_port}"
+        )
+
 
 def _optional_text(value: object) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text if text else None
+
+
+def _optional_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    return int(value)

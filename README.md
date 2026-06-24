@@ -10,13 +10,17 @@ It gives you a terminal UI to manage bookmarks and a direct connect mode:
 ## Features
 
 - Bookmark fields:
+  - entry type: SSH connection or SSH tunnel
   - host/IP (required)
   - username (optional)
   - port (optional)
   - SSH key path (optional)
+  - configured SSH key picker from `~/.ssh/config` `IdentityFile` values
+  - tunnel forwarding fields for SSH tunnel entries
   - alias (optional)
   - description (optional)
 - Connect to a selected bookmark directly from the app
+- Start SSH tunnels from the app and watch the live tunnel log/status
 - Direct alias connect from any terminal via `sshj <alias>`
 - JSON storage at `~/.sshj/bookmarks.json` (override with `SSHJ_BOOKMARKS`)
 
@@ -76,6 +80,7 @@ Inside the app:
 - `Ctrl+S` save bookmark
 - `Ctrl+D` delete bookmark
 - `Ctrl+E` connect to the current form/bookmark
+- `Ctrl+X` stop an active tunnel
 - `q` quit
 
 Direct connect by alias:
@@ -89,6 +94,36 @@ List bookmarks:
 ```bash
 sshj --list
 ```
+
+## SSH keys
+
+The key picker reads `IdentityFile` entries from:
+
+```bash
+~/.ssh/config
+~/.ssh/config.d/*
+```
+
+Pick a configured key from the dropdown, or leave it on `Manual / no key` and type a custom path into the SSH key field.
+
+## SSH tunnels
+
+Set the entry type to `SSH tunnel` to create entries like:
+
+```bash
+ssh -N -L 127.0.0.1:6443:<K8S_API_PRIVATE_HOST>:6443 deploy@<BASTION_HOST>
+```
+
+Use these fields:
+
+- Host / IP: bastion host
+- Username: SSH user, for example `deploy`
+- Local bind host: usually `127.0.0.1`
+- Local port: local port to open, for example `6443`
+- Private remote host: the host reachable from the bastion, for example the private Kubernetes API host
+- Private remote port: remote service port, for example `6443`
+
+Starting a tunnel from the app keeps the UI open and writes status/output to the tunnel log panel. Running `sshj <alias>` for a tunnel alias starts the tunnel directly in the terminal.
 
 ## Notes
 
