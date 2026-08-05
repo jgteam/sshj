@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Sequence
+from dataclasses import dataclass
+from typing import Literal, Sequence
 
 from sshj.models import Bookmark
-from sshj.ssh import connect
+from sshj.ssh import connect, connect_tunnel
 from sshj.storage import BookmarkStorage
+
+
+@dataclass(slots=True)
+class AliasMatch:
+    bookmark: Bookmark
+    mode: Literal["ssh", "tunnel"]
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -39,14 +46,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         bookmarks = _load_bookmarks(storage)
         if bookmarks is None:
             return 1
-        bookmark = _find_by_alias(bookmarks, args.alias)
-        if bookmark is None:
+        match = _find_by_alias(bookmarks, args.alias)
+        if match is None:
             print(
                 f"Alias '{args.alias}' not found. Open the app with 'sshj' to create it.",
                 file=sys.stderr,
             )
             return 1
-        connect(bookmark)
+        if match.mode == "tunnel":
+            connect_tunnel(match.bookmark)
+        else:
+            connect(match.bookmark)
         return 0
 
     if args.list:
@@ -77,10 +87,13 @@ def _load_bookmarks(storage: BookmarkStorage) -> list[Bookmark] | None:
         return None
 
 
-def _find_by_alias(bookmarks: list[Bookmark], alias: str) -> Bookmark | None:
+def _find_by_alias(bookmarks: list[Bookmark], alias: str) -> AliasMatch | None:
     for bookmark in bookmarks:
         if bookmark.alias == alias:
-            return bookmark
+            mode: Literal["ssh", "tunnel"] = "tunnel" if bookmark.is_tunnel else "ssh"
+            return AliasMatch(bookmark, mode)
+        if bookmark.tunnel_alias == alias:
+            return AliasMatch(bookmark, "tunnel")
     return None
 
 
@@ -88,6 +101,10 @@ def _render_bookmark(bookmark: Bookmark) -> str:
     alias = bookmark.alias or "(no alias)"
     port = f":{bookmark.port}" if bookmark.port else ""
     description = f" - {bookmark.description}" if bookmark.description else ""
-    if bookmark.is_tunnel and bookmark.tunnel_spec:
-        return f"[TUN] {alias}: {bookmark.tunnel_spec} via {bookmark.connection_target}{port}{description}"
-    return f"{alias}: {bookmark.connection_target}{port}{description}"
+    lines = [f"[SSH] {alias}: {bookmark.connection_target}{port}{description}"]
+    if bookmark.has_tunnel:
+        tunnel_alias = bookmark.tunnel_display_name or "(no tunnel alias)"
+        lines.append(
+            f"[TUN] {tunnel_alias}: {bookmark.tunnel_spec} via {bookmark.connection_target}{port}"
+        )
+    return "\n".join(lines)

@@ -7,9 +7,6 @@ from sshj.models import Bookmark
 
 
 def build_ssh_command(bookmark: Bookmark) -> list[str]:
-    if bookmark.is_tunnel:
-        return build_tunnel_command(bookmark)
-
     command = ["ssh"]
     _add_common_options(command, bookmark)
     command.append(bookmark.connection_target)
@@ -38,4 +35,9 @@ def _add_common_options(command: list[str], bookmark: Bookmark) -> None:
 
 def connect(bookmark: Bookmark) -> None:
     command = build_ssh_command(bookmark)
+    os.execvp(command[0], command)
+
+
+def connect_tunnel(bookmark: Bookmark) -> None:
+    command = build_tunnel_command(bookmark)
     os.execvp(command[0], command)

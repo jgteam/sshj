@@ -50,6 +50,12 @@ class SSHJApp(App[Bookmark | None]):
         margin-bottom: 1;
     }
 
+    .subsection-title {
+        text-style: bold;
+        margin-top: 2;
+        margin-bottom: 1;
+    }
+
     #bookmark_list {
         height: 1fr;
         border: round $accent;
@@ -60,13 +66,25 @@ class SSHJApp(App[Bookmark | None]):
         margin-top: 1;
     }
 
+    .button-row {
+        height: 3;
+        min-height: 3;
+        margin-top: 1;
+    }
+
+    .button-row Button {
+        width: 1fr;
+        min-width: 12;
+        height: 3;
+    }
+
     #tunnel-log {
         height: 10;
         border: round $accent;
         margin-top: 1;
     }
 
-    #save {
+    #form-actions {
         margin-top: 2;
     }
 
@@ -83,6 +101,7 @@ class SSHJApp(App[Bookmark | None]):
         ("ctrl+s", "save_bookmark", "Save"),
         ("ctrl+d", "delete_bookmark", "Delete"),
         ("ctrl+e", "connect_current", "Connect"),
+        ("ctrl+t", "start_tunnel_current", "Start Tunnel"),
         ("ctrl+x", "stop_tunnel", "Stop Tunnel"),
         ("q", "quit", "Quit"),
     ]
@@ -102,19 +121,14 @@ class SSHJApp(App[Bookmark | None]):
             with Vertical(id="left-pane"):
                 yield Static("Saved Bookmarks", classes="section-title")
                 yield ListView(id="bookmark_list")
-                with Horizontal():
+                with Horizontal(classes="button-row"):
                     yield Button("New", id="new")
                     yield Button("Delete", id="delete", variant="error")
-                    yield Button("Connect", id="connect", variant="success")
+                with Horizontal(classes="button-row"):
+                    yield Button("Connect SSH", id="connect", variant="success")
+                    yield Button("Start Tunnel", id="start_tunnel", variant="warning")
             with VerticalScroll(id="right-pane"):
                 yield Static("Bookmark Details", classes="section-title")
-                yield Label("Entry type", classes="form-label")
-                yield Select(
-                    [("SSH connection", "ssh"), ("SSH tunnel", "tunnel")],
-                    id="entry_type",
-                    allow_blank=False,
-                    value="ssh",
-                )
                 yield Label("Host / IP *", classes="form-label")
                 yield Input(placeholder="example.com", id="host")
                 yield Label("Username (optional)", classes="form-label")
@@ -131,6 +145,13 @@ class SSHJApp(App[Bookmark | None]):
                 )
                 yield Label("SSH key path (optional)", classes="form-label")
                 yield Input(placeholder="~/.ssh/id_ed25519", id="key")
+                yield Label("Alias (optional)", classes="form-label")
+                yield Input(placeholder="prod-db", id="alias")
+                yield Label("Description (optional)", classes="form-label")
+                yield Input(placeholder="Production database", id="description")
+                yield Static("Tunnel Details (optional)", classes="subsection-title")
+                yield Label("Tunnel alias", classes="form-label")
+                yield Input(placeholder="prod-k8s", id="tunnel_alias")
                 yield Label("Local bind host", classes="form-label")
                 yield Input(placeholder="127.0.0.1", id="local_bind_host")
                 yield Label("Local port", classes="form-label")
@@ -139,12 +160,9 @@ class SSHJApp(App[Bookmark | None]):
                 yield Input(placeholder="k8s-api.internal", id="remote_host")
                 yield Label("Private remote port", classes="form-label")
                 yield Input(placeholder="6443", id="remote_port")
-                yield Label("Alias (optional)", classes="form-label")
-                yield Input(placeholder="prod-db", id="alias")
-                yield Label("Description (optional)", classes="form-label")
-                yield Input(placeholder="Production database", id="description")
-                with Horizontal():
+                with Horizontal(id="form-actions", classes="button-row"):
                     yield Button("Save", id="save", variant="primary")
+                    yield Button("Start Tunnel", id="start_tunnel_form", variant="warning")
                     yield Button("Stop Tunnel", id="stop_tunnel", variant="warning")
                 yield Static("Tunnel log", classes="section-title")
                 yield RichLog(id="tunnel-log", wrap=True, highlight=True)
@@ -154,7 +172,6 @@ class SSHJApp(App[Bookmark | None]):
     def on_mount(self) -> None:
         self.identity_files = discover_identity_files()
         self._refresh_key_options()
-        self._sync_mode_controls()
         try:
             self.bookmarks = self.storage.load()
         except Exception as error:  # pragma: no cover - defensive UI fallback
@@ -176,14 +193,14 @@ class SSHJApp(App[Bookmark | None]):
             self.action_delete_bookmark()
         elif button_id == "connect":
             await self.action_connect_current()
+        elif button_id in ("start_tunnel", "start_tunnel_form"):
+            await self.action_start_tunnel_current()
         elif button_id == "stop_tunnel":
             await self.action_stop_tunnel()
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "key_select" and event.value != MANUAL_KEY:
             self.query_one("#key", Input).value = str(event.value)
-        elif event.select.id == "entry_type":
-            self._sync_mode_controls()
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         index = event.list_view.index
@@ -244,12 +261,22 @@ class SSHJApp(App[Bookmark | None]):
         if bookmark is None:
             return
 
-        if bookmark.is_tunnel:
-            await self._start_tunnel(bookmark)
-            return
-
         self._set_status(f"Connecting to {bookmark.connection_target}...")
         self.exit(bookmark)
+
+    async def action_start_tunnel_current(self) -> None:
+        bookmark = self._bookmark_from_form(
+            ignore_index=self.selected_index,
+            enforce_unique_alias=False,
+        )
+        if bookmark is None:
+            return
+
+        if not bookmark.has_tunnel:
+            self._set_status("Fill the tunnel fields first, then save/start the tunnel.", error=True)
+            return
+
+        await self._start_tunnel(bookmark)
 
     async def action_stop_tunnel(self) -> None:
         await self._stop_tunnel()
@@ -282,13 +309,13 @@ class SSHJApp(App[Bookmark | None]):
         bookmark = self.bookmarks[index]
         self.selected_index = index
 
-        self.query_one("#entry_type", Select).value = bookmark.entry_type
         self.query_one("#host", Input).value = bookmark.host
         self.query_one("#username", Input).value = bookmark.username or ""
         self.query_one("#port", Input).value = "" if bookmark.port is None else str(bookmark.port)
         self._select_key(bookmark.key_path)
         self.query_one("#key", Input).value = bookmark.key_path or ""
-        self.query_one("#local_bind_host", Input).value = bookmark.local_bind_host or ""
+        self.query_one("#tunnel_alias", Input).value = bookmark.tunnel_alias or ""
+        self.query_one("#local_bind_host", Input).value = bookmark.local_bind_host or "127.0.0.1"
         self.query_one("#local_port", Input).value = (
             "" if bookmark.local_port is None else str(bookmark.local_port)
         )
@@ -298,29 +325,26 @@ class SSHJApp(App[Bookmark | None]):
         )
         self.query_one("#alias", Input).value = bookmark.alias or ""
         self.query_one("#description", Input).value = bookmark.description or ""
-        self._sync_mode_controls()
 
     def _clear_form(self) -> None:
-        self.query_one("#entry_type", Select).value = "ssh"
         self.query_one("#host", Input).value = ""
         self.query_one("#username", Input).value = ""
         self.query_one("#port", Input).value = ""
         self.query_one("#key_select", Select).value = MANUAL_KEY
         self.query_one("#key", Input).value = ""
+        self.query_one("#tunnel_alias", Input).value = ""
         self.query_one("#local_bind_host", Input).value = "127.0.0.1"
         self.query_one("#local_port", Input).value = ""
         self.query_one("#remote_host", Input).value = ""
         self.query_one("#remote_port", Input).value = ""
         self.query_one("#alias", Input).value = ""
         self.query_one("#description", Input).value = ""
-        self._sync_mode_controls()
 
     def _bookmark_from_form(
         self,
         ignore_index: int | None,
         enforce_unique_alias: bool,
     ) -> Bookmark | None:
-        entry_type = str(self.query_one("#entry_type", Select).value)
         host = self.query_one("#host", Input).value.strip()
         if not host:
             self._set_status("Host / IP is required.", error=True)
@@ -332,14 +356,27 @@ class SSHJApp(App[Bookmark | None]):
             return None
 
         key_path = self.query_one("#key", Input).value.strip() or None
+        tunnel_alias = self.query_one("#tunnel_alias", Input).value.strip() or None
+        local_port_value = self.query_one("#local_port", Input).value.strip()
+        remote_port_value = self.query_one("#remote_port", Input).value.strip()
         local_bind_host = self.query_one("#local_bind_host", Input).value.strip() or None
         local_port = self._parse_port("#local_port", "Local port")
+        if local_port is None and local_port_value:
+            return None
         remote_host = self.query_one("#remote_host", Input).value.strip() or None
         remote_port = self._parse_port("#remote_port", "Private remote port")
+        if remote_port is None and remote_port_value:
+            return None
         alias = self.query_one("#alias", Input).value.strip() or None
         description = self.query_one("#description", Input).value.strip() or None
+        has_any_tunnel_field = any(
+            [tunnel_alias, local_port_value, remote_host, remote_port_value]
+        ) or local_bind_host not in (None, "127.0.0.1")
 
-        if entry_type == "tunnel":
+        if has_any_tunnel_field:
+            if not tunnel_alias:
+                self._set_status("Tunnel alias is required when a tunnel is configured.", error=True)
+                return None
             if not local_bind_host:
                 self._set_status("Local bind host is required for tunnels.", error=True)
                 return None
@@ -352,14 +389,17 @@ class SSHJApp(App[Bookmark | None]):
             if remote_port is None:
                 self._set_status("Private remote port is required for tunnels.", error=True)
                 return None
+        else:
+            # The new-entry form supplies this convenience default, but it does not
+            # mean the user configured a tunnel.
+            local_bind_host = None
 
-        if alias and enforce_unique_alias:
-            for index, existing in enumerate(self.bookmarks):
-                if index == ignore_index:
-                    continue
-                if existing.alias == alias:
-                    self._set_status(f"Alias '{alias}' already exists.", error=True)
-                    return None
+        if alias and tunnel_alias and alias == tunnel_alias:
+            self._set_status("SSH alias and tunnel alias must be different.", error=True)
+            return None
+
+        if enforce_unique_alias and not self._aliases_are_unique(alias, tunnel_alias, ignore_index):
+            return None
 
         return Bookmark(
             host=host,
@@ -368,7 +408,8 @@ class SSHJApp(App[Bookmark | None]):
             key_path=key_path,
             alias=alias,
             description=description,
-            entry_type=entry_type,
+            entry_type="ssh",
+            tunnel_alias=tunnel_alias,
             local_bind_host=local_bind_host,
             local_port=local_port,
             remote_host=remote_host,
@@ -403,11 +444,29 @@ class SSHJApp(App[Bookmark | None]):
         else:
             key_select.value = MANUAL_KEY
 
-    def _sync_mode_controls(self) -> None:
-        entry_type = self.query_one("#entry_type", Select).value
-        tunnel_enabled = entry_type == "tunnel"
-        for selector in ("#local_bind_host", "#local_port", "#remote_host", "#remote_port"):
-            self.query_one(selector, Input).disabled = not tunnel_enabled
+    def _aliases_are_unique(
+        self,
+        alias: str | None,
+        tunnel_alias: str | None,
+        ignore_index: int | None,
+    ) -> bool:
+        aliases_to_check = [
+            (alias, "SSH alias"),
+            (tunnel_alias, "Tunnel alias"),
+        ]
+        for current_alias, label in aliases_to_check:
+            if not current_alias:
+                continue
+            for index, existing in enumerate(self.bookmarks):
+                if index == ignore_index:
+                    continue
+                if existing.alias == current_alias:
+                    self._set_status(f"{label} '{current_alias}' already exists.", error=True)
+                    return False
+                if existing.tunnel_alias == current_alias:
+                    self._set_status(f"{label} '{current_alias}' already exists as a tunnel alias.", error=True)
+                    return False
+        return True
 
     async def _start_tunnel(self, bookmark: Bookmark) -> None:
         if self.active_tunnel and self.active_tunnel.returncode is None:
@@ -495,9 +554,11 @@ class SSHJApp(App[Bookmark | None]):
         alias = bookmark.alias or f"bookmark-{index + 1}"
         port = f":{bookmark.port}" if bookmark.port else ""
         description = f" - {bookmark.description}" if bookmark.description else ""
-        if bookmark.is_tunnel and bookmark.tunnel_spec:
-            return f"[TUN] {alias} -> {bookmark.tunnel_spec} via {bookmark.connection_target}{port}{description}"
-        return f"[SSH] {alias} -> {bookmark.connection_target}{port}{description}"
+        tunnel = ""
+        if bookmark.has_tunnel:
+            tunnel_alias = bookmark.tunnel_display_name or "no-tunnel-alias"
+            tunnel = f" | tunnel {tunnel_alias}: {bookmark.tunnel_spec}"
+        return f"[SSH] {alias} -> {bookmark.connection_target}{port}{description}{tunnel}"
 
     @staticmethod
     def _key_label(value: str) -> str:

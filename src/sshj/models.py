@@ -12,6 +12,7 @@ class Bookmark:
     alias: str | None = None
     description: str | None = None
     entry_type: str = "ssh"
+    tunnel_alias: str | None = None
     local_bind_host: str | None = None
     local_port: int | None = None
     remote_host: str | None = None
@@ -25,6 +26,10 @@ class Bookmark:
         alias = _optional_text(data.get("alias"))
         description = _optional_text(data.get("description"))
         entry_type = _optional_text(data.get("entry_type")) or "ssh"
+        tunnel_alias = _optional_text(data.get("tunnel_alias"))
+        if entry_type == "tunnel" and tunnel_alias is None:
+            tunnel_alias = alias
+            alias = None
 
         if not host:
             raise ValueError("Bookmark host is required")
@@ -37,6 +42,7 @@ class Bookmark:
             alias=alias,
             description=description,
             entry_type=entry_type,
+            tunnel_alias=tunnel_alias,
             local_bind_host=_optional_text(data.get("local_bind_host")),
             local_port=_optional_int(data.get("local_port")),
             remote_host=_optional_text(data.get("remote_host")),
@@ -52,6 +58,7 @@ class Bookmark:
             "alias": self.alias,
             "description": self.description,
             "entry_type": self.entry_type,
+            "tunnel_alias": self.tunnel_alias,
             "local_bind_host": self.local_bind_host,
             "local_port": self.local_port,
             "remote_host": self.remote_host,
@@ -73,10 +80,21 @@ class Bookmark:
         return self.entry_type == "tunnel"
 
     @property
+    def has_tunnel(self) -> bool:
+        return self.tunnel_spec is not None
+
+    @property
+    def tunnel_display_name(self) -> str | None:
+        return self.tunnel_alias or (self.alias if self.is_tunnel else None)
+
+    @property
     def tunnel_spec(self) -> str | None:
-        if not self.is_tunnel:
-            return None
-        if not self.local_bind_host or not self.local_port or not self.remote_host or not self.remote_port:
+        if (
+            not self.local_bind_host
+            or not self.local_port
+            or not self.remote_host
+            or not self.remote_port
+        ):
             return None
         return (
             f"{self.local_bind_host}:{self.local_port}:"

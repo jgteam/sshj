@@ -10,13 +10,12 @@ It gives you a terminal UI to manage bookmarks and a direct connect mode:
 ## Features
 
 - Bookmark fields:
-  - entry type: SSH connection or SSH tunnel
   - host/IP (required)
   - username (optional)
   - port (optional)
   - SSH key path (optional)
   - configured SSH key picker from `~/.ssh/config` `IdentityFile` values
-  - tunnel forwarding fields for SSH tunnel entries
+  - optional SSH tunnel with its own tunnel alias
   - alias (optional)
   - description (optional)
 - Connect to a selected bookmark directly from the app
@@ -43,9 +42,6 @@ iTerm2 uses your shell startup files, so adding `sshj` to `~/.zshrc` makes it av
 
 ```bash
 source /Users/jannisgunsche/PycharmProjects/sshj/shell/sshj.sh
-
-echo 'source /Users/jannisgunsche/PycharmProjects/sshj/shell/sshj.sh' >> ~/.zshrc
-source ~/.zshrc
 ```
 
 2. Reload zsh:
@@ -79,14 +75,21 @@ Inside the app:
 - `Ctrl+N` new bookmark
 - `Ctrl+S` save bookmark
 - `Ctrl+D` delete bookmark
-- `Ctrl+E` connect to the current form/bookmark
+- `Ctrl+E` connect SSH to the current form/bookmark
+- `Ctrl+T` start the optional tunnel for the current form/bookmark
 - `Ctrl+X` stop an active tunnel
 - `q` quit
 
-Direct connect by alias:
+Direct SSH connect by server alias:
 
 ```bash
 sshj my-alias
+```
+
+Start a tunnel by tunnel alias:
+
+```bash
+sshj my-tunnel-alias
 ```
 
 List bookmarks:
@@ -108,26 +111,30 @@ Pick a configured key from the dropdown, or leave it on `Manual / no key` and ty
 
 ## SSH tunnels
 
-Set the entry type to `SSH tunnel` to create entries like:
+Each server entry can optionally include one tunnel. Fill the normal server fields for the bastion host, then fill the tunnel fields below it.
+
+For example, this command:
 
 ```bash
 ssh -N -L 127.0.0.1:6443:<K8S_API_PRIVATE_HOST>:6443 deploy@<BASTION_HOST>
 ```
 
-Use these fields:
+maps to these fields:
 
 - Host / IP: bastion host
 - Username: SSH user, for example `deploy`
+- Tunnel alias: alias used to start this tunnel from the terminal, for example `prod-k8s`
 - Local bind host: usually `127.0.0.1`
 - Local port: local port to open, for example `6443`
 - Private remote host: the host reachable from the bastion, for example the private Kubernetes API host
 - Private remote port: remote service port, for example `6443`
 
-Starting a tunnel from the app keeps the UI open and writes status/output to the tunnel log panel. Running `sshj <alias>` for a tunnel alias starts the tunnel directly in the terminal.
+Starting a tunnel from the app keeps the UI open and writes status/output to the tunnel log panel. Running `sshj <tunnel-alias>` starts the tunnel directly in the terminal.
 
 ## Notes
 
 - Alias is optional for saved entries, but required for `sshj <alias>` direct connect.
+- Tunnel alias is required if you configure tunnel fields and want `sshj <tunnel-alias>`.
 - Host should be plain host/IP; set the login user in the `username` field.
 - Existing entries with `user@host` in host still work for backward compatibility.
 
