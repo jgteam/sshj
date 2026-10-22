@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shlex
 import sys
 from dataclasses import dataclass
 from typing import Literal, Sequence
 
 from sshj.models import Bookmark
 from sshj.ssh import connect, connect_tunnel
-from sshj.storage import BookmarkStorage
+from sshj.storage import BookmarkStorage, KubeconfigStorage
 
 
 @dataclass(slots=True)
@@ -24,19 +26,35 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "alias",
         nargs="?",
-        help="Connect directly to a saved bookmark alias.",
+        help="Connect to an SSH alias, or use 'kc' for kubeconfigs.",
+    )
+    parser.add_argument(
+        "kc_name",
+        nargs="?",
+        help="Kubeconfig name when using 'kc'.",
     )
     parser.add_argument(
         "--list",
         action="store_true",
         help="List saved bookmarks and exit.",
     )
+    parser.add_argument("--emit-shell", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     storage = BookmarkStorage()
+
+    if args.alias == "kc":
+        if args.list or (args.emit_shell and not args.kc_name):
+            print("Use 'sshj kc [name]' without --list.", file=sys.stderr)
+            return 2
+        return _kubeconfig_command(args.kc_name, args.emit_shell)
+
+    if args.kc_name or args.emit_shell:
+        print("A second name and --emit-shell are only valid with 'sshj kc'.", file=sys.stderr)
+        return 2
 
     if args.alias and args.list:
         print("Use either an alias or --list, not both.", file=sys.stderr)
@@ -108,3 +126,33 @@ def _render_bookmark(bookmark: Bookmark) -> str:
             f"[TUN] {tunnel_alias}: {bookmark.tunnel_spec} via {bookmark.connection_target}{port}"
         )
     return "\n".join(lines)
+
+
+def _kubeconfig_command(name: str | None, emit_shell: bool) -> int:
+    storage = KubeconfigStorage()
+    try:
+        entries = storage.load()
+    except Exception as error:
+        print(f"Failed to load kubeconfigs from {storage.path}: {error}", file=sys.stderr)
+        return 1
+
+    selected = None
+    if name is not None:
+        selected = next((entry for entry in entries if entry.name.casefold() == name.casefold()), None)
+        if selected is None:
+            print(f"Kubeconfig '{name}' not found. Open 'sshj' to add it.", file=sys.stderr)
+            return 1
+
+    output = sys.stderr if emit_shell else sys.stdout
+    if not entries:
+        print("No kubeconfigs saved yet. Open 'sshj' to add one.", file=output)
+    else:
+        print("Available kubeconfigs (* = selected):", file=output)
+        active_path = selected.expanded_path if selected else os.environ.get("KUBECONFIG")
+        for entry in entries:
+            marker = "*" if entry.expanded_path == active_path else " "
+            print(f"{marker} {entry.name} -> {entry.expanded_path}", file=output)
+
+    if selected is not None:
+        print(f"export KUBECONFIG={shlex.quote(selected.expanded_path)}")
+    return 0

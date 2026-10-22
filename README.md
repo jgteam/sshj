@@ -6,6 +6,8 @@ It gives you a terminal UI to manage bookmarks and a direct connect mode:
 
 - `sshj` opens the TUI app
 - `sshj <alias>` connects directly to a saved alias
+- `sshj kc` lists saved kubeconfigs and marks the active one
+- `sshj kc <name>` selects a kubeconfig in the current terminal
 
 ## Features
 
@@ -22,6 +24,7 @@ It gives you a terminal UI to manage bookmarks and a direct connect mode:
 - Start SSH tunnels from the app and watch the live tunnel log/status
 - Direct alias connect from any terminal via `sshj <alias>`
 - JSON storage at `~/.sshj/bookmarks.json` (override with `SSHJ_BOOKMARKS`)
+- Kubeconfig entries with a name and absolute path, stored at `~/.sshj/kubeconfigs.json` (override with `SSHJ_KUBECONFIGS`)
 
 ## Install (editable)
 
@@ -59,6 +62,7 @@ sshj --list
 
 The sourced helper defines an `sshj` shell function that runs this project directly.
 It uses `/Users/jannisgunsche/PycharmProjects/sshj/.venv/bin/python` if present, otherwise `python3` from PATH.
+The shell function is required for `sshj kc <name>` to export `KUBECONFIG` into the current terminal.
 
 If you use bash in another terminal, add the same `source .../shell/sshj.sh` line to `~/.bashrc`.
 
@@ -79,6 +83,18 @@ Inside the app:
 - `Ctrl+T` start the optional tunnel for the current form/bookmark
 - `Ctrl+X` stop an active tunnel
 - `q` quit
+
+The app has two top-level tabs: **SSH** for the existing bookmarks and tunnels, and **KUBECONFIG** for named kubeconfig paths. In KUBECONFIG, add a name such as `CP-01` and a path such as `/Users/jannisgunsche/Git/cluster.gue.cloud/.state/kubeconfig-cp-01.yaml`, then save it.
+
+In a terminal where `shell/sshj.sh` is sourced:
+
+```bash
+sshj kc
+sshj kc cp-01
+echo "$KUBECONFIG"
+```
+
+Names match without regard to letter case. `sshj kc` lists all entries and marks the one selected in that terminal with `*`. `sshj kc cp-01` lists the entries, marks `CP-01`, and exports its path for later commands in the same terminal. Without the sourced shell helper, the Python command prints the `export KUBECONFIG=...` command for you to run manually.
 
 Direct SSH connect by server alias:
 

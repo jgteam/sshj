@@ -19,7 +19,7 @@ unset _sshj_script_path
 unset _sshj_script_dir
 
 sshj() {
-  local python_bin
+  local python_bin shell_command
   if [ -x "${SSHJ_PROJECT_ROOT}/.venv/bin/python" ]; then
     python_bin="${SSHJ_PROJECT_ROOT}/.venv/bin/python"
   else
@@ -31,5 +31,10 @@ sshj() {
     return 1
   fi
 
-  PYTHONPATH="${SSHJ_PROJECT_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" "${python_bin}" -m sshj "$@"
+  if [ "${1:-}" = "kc" ] && [ -n "${2:-}" ] && [ "${2#-}" = "${2}" ]; then
+    shell_command="$(PYTHONPATH="${SSHJ_PROJECT_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" "${python_bin}" -m sshj "$@" --emit-shell)" || return $?
+    eval "${shell_command}"
+  else
+    PYTHONPATH="${SSHJ_PROJECT_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" "${python_bin}" -m sshj "$@"
+  fi
 }

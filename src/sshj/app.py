@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shlex
+from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -16,12 +18,15 @@ from textual.widgets import (
     RichLog,
     Select,
     Static,
+    TabbedContent,
+    TabPane,
 )
 
+from sshj.kubeconfig import KubeconfigEntry
 from sshj.models import Bookmark
 from sshj.ssh import build_tunnel_command
 from sshj.ssh_config import discover_identity_files
-from sshj.storage import BookmarkStorage
+from sshj.storage import BookmarkStorage, KubeconfigStorage
 
 
 MANUAL_KEY = "__manual__"
@@ -33,12 +38,16 @@ class SSHJApp(App[Bookmark | None]):
         layout: vertical;
     }
 
-    #body {
+    #body,
+    #kubeconfig-body {
         height: 1fr;
     }
 
-    #left-pane,
-    #right-pane {
+    TabbedContent {
+        height: 1fr;
+    }
+
+    .pane {
         width: 1fr;
         padding: 1 2;
         border: round $panel;
@@ -57,6 +66,12 @@ class SSHJApp(App[Bookmark | None]):
     }
 
     #bookmark_list {
+        height: 1fr;
+        border: round $accent;
+        margin-bottom: 1;
+    }
+
+    #kubeconfig_list {
         height: 1fr;
         border: round $accent;
         margin-bottom: 1;
@@ -106,82 +121,118 @@ class SSHJApp(App[Bookmark | None]):
         ("q", "quit", "Quit"),
     ]
 
-    def __init__(self, storage: BookmarkStorage) -> None:
+    def __init__(
+        self,
+        storage: BookmarkStorage,
+        kubeconfig_storage: KubeconfigStorage | None = None,
+    ) -> None:
         super().__init__()
         self.storage = storage
+        self.kubeconfig_storage = kubeconfig_storage or KubeconfigStorage()
         self.bookmarks: list[Bookmark] = []
+        self.kubeconfigs: list[KubeconfigEntry] = []
         self.identity_files: list[str] = []
         self.selected_index: int | None = None
+        self.selected_kubeconfig_index: int | None = None
         self.active_tunnel: asyncio.subprocess.Process | None = None
         self.tunnel_task: asyncio.Task[None] | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal(id="body"):
-            with Vertical(id="left-pane"):
-                yield Static("Saved Bookmarks", classes="section-title")
-                yield ListView(id="bookmark_list")
-                with Horizontal(classes="button-row"):
-                    yield Button("New", id="new")
-                    yield Button("Delete", id="delete", variant="error")
-                with Horizontal(classes="button-row"):
-                    yield Button("Connect SSH", id="connect", variant="success")
-                    yield Button("Start Tunnel", id="start_tunnel", variant="warning")
-            with VerticalScroll(id="right-pane"):
-                yield Static("Bookmark Details", classes="section-title")
-                yield Label("Host / IP *", classes="form-label")
-                yield Input(placeholder="example.com", id="host")
-                yield Label("Username (optional)", classes="form-label")
-                yield Input(placeholder="ubuntu", id="username")
-                yield Label("Port (optional)", classes="form-label")
-                yield Input(placeholder="22", id="port")
-                yield Label("Configured SSH key", classes="form-label")
-                yield Select(
-                    [(self._key_label(MANUAL_KEY), MANUAL_KEY)],
-                    id="key_select",
-                    prompt="Select key from SSH config",
-                    allow_blank=False,
-                    value=MANUAL_KEY,
-                )
-                yield Label("SSH key path (optional)", classes="form-label")
-                yield Input(placeholder="~/.ssh/id_ed25519", id="key")
-                yield Label("Alias (optional)", classes="form-label")
-                yield Input(placeholder="prod-db", id="alias")
-                yield Label("Description (optional)", classes="form-label")
-                yield Input(placeholder="Production database", id="description")
-                yield Static("Tunnel Details (optional)", classes="subsection-title")
-                yield Label("Tunnel alias", classes="form-label")
-                yield Input(placeholder="prod-k8s", id="tunnel_alias")
-                yield Label("Local bind host", classes="form-label")
-                yield Input(placeholder="127.0.0.1", id="local_bind_host")
-                yield Label("Local port", classes="form-label")
-                yield Input(placeholder="6443", id="local_port")
-                yield Label("Private remote host", classes="form-label")
-                yield Input(placeholder="k8s-api.internal", id="remote_host")
-                yield Label("Private remote port", classes="form-label")
-                yield Input(placeholder="6443", id="remote_port")
-                with Horizontal(id="form-actions", classes="button-row"):
-                    yield Button("Save", id="save", variant="primary")
-                    yield Button("Start Tunnel", id="start_tunnel_form", variant="warning")
-                    yield Button("Stop Tunnel", id="stop_tunnel", variant="warning")
-                yield Static("Tunnel log", classes="section-title")
-                yield RichLog(id="tunnel-log", wrap=True, highlight=True)
+        with TabbedContent(initial="ssh-tab"):
+            with TabPane("SSH", id="ssh-tab"):
+                with Horizontal(id="body"):
+                    with Vertical(classes="pane"):
+                        yield Static("Saved Bookmarks", classes="section-title")
+                        yield ListView(id="bookmark_list")
+                        with Horizontal(classes="button-row"):
+                            yield Button("New", id="new")
+                            yield Button("Delete", id="delete", variant="error")
+                        with Horizontal(classes="button-row"):
+                            yield Button("Connect SSH", id="connect", variant="success")
+                            yield Button("Start Tunnel", id="start_tunnel", variant="warning")
+                    with VerticalScroll(classes="pane"):
+                        yield Static("Bookmark Details", classes="section-title")
+                        yield Label("Host / IP *", classes="form-label")
+                        yield Input(placeholder="example.com", id="host")
+                        yield Label("Username (optional)", classes="form-label")
+                        yield Input(placeholder="ubuntu", id="username")
+                        yield Label("Port (optional)", classes="form-label")
+                        yield Input(placeholder="22", id="port")
+                        yield Label("Configured SSH key", classes="form-label")
+                        yield Select(
+                            [(self._key_label(MANUAL_KEY), MANUAL_KEY)],
+                            id="key_select",
+                            prompt="Select key from SSH config",
+                            allow_blank=False,
+                            value=MANUAL_KEY,
+                        )
+                        yield Label("SSH key path (optional)", classes="form-label")
+                        yield Input(placeholder="~/.ssh/id_ed25519", id="key")
+                        yield Label("Alias (optional)", classes="form-label")
+                        yield Input(placeholder="prod-db", id="alias")
+                        yield Label("Description (optional)", classes="form-label")
+                        yield Input(placeholder="Production database", id="description")
+                        yield Static("Tunnel Details (optional)", classes="subsection-title")
+                        yield Label("Tunnel alias", classes="form-label")
+                        yield Input(placeholder="prod-k8s", id="tunnel_alias")
+                        yield Label("Local bind host", classes="form-label")
+                        yield Input(placeholder="127.0.0.1", id="local_bind_host")
+                        yield Label("Local port", classes="form-label")
+                        yield Input(placeholder="6443", id="local_port")
+                        yield Label("Private remote host", classes="form-label")
+                        yield Input(placeholder="k8s-api.internal", id="remote_host")
+                        yield Label("Private remote port", classes="form-label")
+                        yield Input(placeholder="6443", id="remote_port")
+                        with Horizontal(id="form-actions", classes="button-row"):
+                            yield Button("Save", id="save", variant="primary")
+                            yield Button("Start Tunnel", id="start_tunnel_form", variant="warning")
+                            yield Button("Stop Tunnel", id="stop_tunnel", variant="warning")
+                        yield Static("Tunnel log", classes="section-title")
+                        yield RichLog(id="tunnel-log", wrap=True, highlight=True)
+            with TabPane("KUBECONFIG", id="kubeconfig-tab"):
+                with Horizontal(id="kubeconfig-body"):
+                    with Vertical(classes="pane"):
+                        yield Static("Saved Kubeconfigs", classes="section-title")
+                        yield ListView(id="kubeconfig_list")
+                        with Horizontal(classes="button-row"):
+                            yield Button("New", id="new_kubeconfig")
+                            yield Button("Delete", id="delete_kubeconfig", variant="error")
+                    with VerticalScroll(classes="pane"):
+                        yield Static("Kubeconfig Details", classes="section-title")
+                        yield Label("Name *", classes="form-label")
+                        yield Input(placeholder="CP-01", id="kubeconfig_name")
+                        yield Label("Path *", classes="form-label")
+                        yield Input(placeholder="/path/to/kubeconfig.yaml", id="kubeconfig_path")
+                        with Horizontal(classes="button-row"):
+                            yield Button("Save", id="save_kubeconfig", variant="primary")
+                        yield Static("Use `sshj kc <name>` in a terminal to select it.")
         yield Static("", id="status")
         yield Footer()
 
     def on_mount(self) -> None:
         self.identity_files = discover_identity_files()
         self._refresh_key_options()
+        errors: list[str] = []
         try:
             self.bookmarks = self.storage.load()
         except Exception as error:  # pragma: no cover - defensive UI fallback
             self.bookmarks = []
-            self._set_status(f"Could not load bookmarks: {error}", error=True)
-            return
+            errors.append(f"Could not load bookmarks: {error}")
         self._refresh_list()
-        self._set_status(
-            f"Loaded {len(self.bookmarks)} bookmark(s). Press Ctrl+N to create a new one."
-        )
+        try:
+            self.kubeconfigs = self.kubeconfig_storage.load()
+        except Exception as error:
+            self.kubeconfigs = []
+            errors.append(f"Could not load kubeconfigs: {error}")
+        self._refresh_kubeconfig_list()
+        if errors:
+            self._set_status("; ".join(errors), error=True)
+        else:
+            self._set_status(
+                f"Loaded {len(self.bookmarks)} SSH bookmark(s) and "
+                f"{len(self.kubeconfigs)} kubeconfig(s)."
+            )
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id
@@ -197,6 +248,12 @@ class SSHJApp(App[Bookmark | None]):
             await self.action_start_tunnel_current()
         elif button_id == "stop_tunnel":
             await self.action_stop_tunnel()
+        elif button_id == "new_kubeconfig":
+            self.action_new_kubeconfig()
+        elif button_id == "save_kubeconfig":
+            self.action_save_kubeconfig()
+        elif button_id == "delete_kubeconfig":
+            self.action_delete_kubeconfig()
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "key_select" and event.value != MANUAL_KEY:
@@ -204,21 +261,36 @@ class SSHJApp(App[Bookmark | None]):
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         index = event.list_view.index
-        if index is not None and 0 <= index < len(self.bookmarks):
+        if event.list_view.id == "kubeconfig_list":
+            if index is not None and 0 <= index < len(self.kubeconfigs):
+                self._load_kubeconfig(index)
+        elif index is not None and 0 <= index < len(self.bookmarks):
             self._load_bookmark(index)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         index = event.list_view.index
-        if index is not None and 0 <= index < len(self.bookmarks):
+        if event.list_view.id == "kubeconfig_list":
+            if index is not None and 0 <= index < len(self.kubeconfigs):
+                self._load_kubeconfig(index)
+        elif index is not None and 0 <= index < len(self.bookmarks):
             self._load_bookmark(index)
 
+    def _on_kubeconfig_tab(self) -> bool:
+        return self.query_one(TabbedContent).active == "kubeconfig-tab"
+
     def action_new_bookmark(self) -> None:
+        if self._on_kubeconfig_tab():
+            self.action_new_kubeconfig()
+            return
         self.selected_index = None
         self._clear_form()
         self.query_one("#host", Input).focus()
         self._set_status("Creating a new bookmark.")
 
     def action_save_bookmark(self) -> None:
+        if self._on_kubeconfig_tab():
+            self.action_save_kubeconfig()
+            return
         bookmark = self._bookmark_from_form(
             ignore_index=self.selected_index,
             enforce_unique_alias=True,
@@ -239,6 +311,9 @@ class SSHJApp(App[Bookmark | None]):
         self._set_status(f"Bookmark {action}.")
 
     def action_delete_bookmark(self) -> None:
+        if self._on_kubeconfig_tab():
+            self.action_delete_kubeconfig()
+            return
         if self.selected_index is None:
             self._set_status("Select a bookmark to delete.", error=True)
             return
@@ -254,6 +329,8 @@ class SSHJApp(App[Bookmark | None]):
         self._set_status("Bookmark deleted.")
 
     async def action_connect_current(self) -> None:
+        if self._on_kubeconfig_tab():
+            return
         bookmark = self._bookmark_from_form(
             ignore_index=self.selected_index,
             enforce_unique_alias=False,
@@ -265,6 +342,8 @@ class SSHJApp(App[Bookmark | None]):
         self.exit(bookmark)
 
     async def action_start_tunnel_current(self) -> None:
+        if self._on_kubeconfig_tab():
+            return
         bookmark = self._bookmark_from_form(
             ignore_index=self.selected_index,
             enforce_unique_alias=False,
@@ -280,6 +359,78 @@ class SSHJApp(App[Bookmark | None]):
 
     async def action_stop_tunnel(self) -> None:
         await self._stop_tunnel()
+
+    def action_new_kubeconfig(self) -> None:
+        self.selected_kubeconfig_index = None
+        self._clear_kubeconfig_form()
+        self.query_one("#kubeconfig_name", Input).focus()
+        self._set_status("Creating a new kubeconfig entry.")
+
+    def action_save_kubeconfig(self) -> None:
+        name = self.query_one("#kubeconfig_name", Input).value.strip()
+        path = self.query_one("#kubeconfig_path", Input).value.strip()
+        if not name or not path:
+            self._set_status("Name and path are required.", error=True)
+            return
+        if not Path(path).expanduser().is_absolute():
+            self._set_status("Kubeconfig path must be absolute or start with ~.", error=True)
+            return
+        for index, entry in enumerate(self.kubeconfigs):
+            if index != self.selected_kubeconfig_index and entry.name.casefold() == name.casefold():
+                self._set_status(f"Kubeconfig name '{name}' already exists.", error=True)
+                return
+
+        entry = KubeconfigEntry(name=name, path=path)
+        if self.selected_kubeconfig_index is None:
+            self.kubeconfigs.append(entry)
+            self.selected_kubeconfig_index = len(self.kubeconfigs) - 1
+            action = "created"
+        else:
+            self.kubeconfigs[self.selected_kubeconfig_index] = entry
+            action = "updated"
+        self.kubeconfig_storage.save(self.kubeconfigs)
+        self._refresh_kubeconfig_list(select_index=self.selected_kubeconfig_index)
+        self._set_status(f"Kubeconfig {action}. Select it with sshj kc {name.casefold()}.")
+
+    def action_delete_kubeconfig(self) -> None:
+        if self.selected_kubeconfig_index is None:
+            self._set_status("Select a kubeconfig to delete.", error=True)
+            return
+        self.kubeconfigs.pop(self.selected_kubeconfig_index)
+        self.kubeconfig_storage.save(self.kubeconfigs)
+        next_index = None
+        if self.kubeconfigs:
+            next_index = min(self.selected_kubeconfig_index, len(self.kubeconfigs) - 1)
+        self._refresh_kubeconfig_list(select_index=next_index)
+        self._set_status("Kubeconfig deleted.")
+
+    def _refresh_kubeconfig_list(self, select_index: int | None = None) -> None:
+        list_view = self.query_one("#kubeconfig_list", ListView)
+        for child in list(list_view.children):
+            child.remove()
+        active_path = os.environ.get("KUBECONFIG")
+        for entry in self.kubeconfigs:
+            marker = "*" if entry.expanded_path == active_path else " "
+            list_view.append(ListItem(Label(f"{marker} {entry.name} -> {entry.path}")))
+        if not self.kubeconfigs:
+            self.selected_kubeconfig_index = None
+            self._clear_kubeconfig_form()
+            return
+        target_index = select_index if select_index is not None else 0
+        if target_index < 0 or target_index >= len(self.kubeconfigs):
+            target_index = 0
+        list_view.index = target_index
+        self._load_kubeconfig(target_index)
+
+    def _load_kubeconfig(self, index: int) -> None:
+        entry = self.kubeconfigs[index]
+        self.selected_kubeconfig_index = index
+        self.query_one("#kubeconfig_name", Input).value = entry.name
+        self.query_one("#kubeconfig_path", Input).value = entry.path
+
+    def _clear_kubeconfig_form(self) -> None:
+        self.query_one("#kubeconfig_name", Input).value = ""
+        self.query_one("#kubeconfig_path", Input).value = ""
 
     def _refresh_list(self, select_index: int | None = None) -> None:
         list_view = self.query_one("#bookmark_list", ListView)
