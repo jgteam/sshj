@@ -139,9 +139,6 @@ def _kubeconfig_command(name: str | None, emit_shell: bool) -> int:
     selected = None
     if name is not None:
         selected = next((entry for entry in entries if entry.name.casefold() == name.casefold()), None)
-        if selected is None:
-            print(f"Kubeconfig '{name}' not found. Open 'sshj' to add it.", file=sys.stderr)
-            return 1
 
     output = sys.stderr if emit_shell else sys.stdout
     if not entries:
@@ -155,4 +152,4 @@ def _kubeconfig_command(name: str | None, emit_shell: bool) -> int:
 
     if selected is not None:
         print(f"export KUBECONFIG={shlex.quote(selected.expanded_path)}")
-    return 0
+    return 1 if name is not None and selected is None else 0

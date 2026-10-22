@@ -94,7 +94,7 @@ sshj kc cp-01
 echo "$KUBECONFIG"
 ```
 
-Names match without regard to letter case. `sshj kc` lists all entries and marks the one selected in that terminal with `*`. `sshj kc cp-01` lists the entries, marks `CP-01`, and exports its path for later commands in the same terminal. Without the sourced shell helper, the Python command prints the `export KUBECONFIG=...` command for you to run manually.
+Names match without regard to letter case. `sshj kc` lists all entries and marks the one selected in that terminal with `*`. `sshj kc cp-01` lists the entries, marks `CP-01`, and exports its path for later commands in the same terminal. An unknown name shows the available entries and leaves the current selection unchanged. Without the sourced shell helper, the Python command prints the `export KUBECONFIG=...` command for you to run manually.
 
 Direct SSH connect by server alias:
 

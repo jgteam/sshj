@@ -41,16 +41,21 @@ def test_shell_function_exports_selected_kubeconfig(tmp_path) -> None:
 
 def test_missing_kubeconfig_does_not_change_shell(tmp_path) -> None:
     storage_path = tmp_path / "kubeconfigs.json"
-    KubeconfigStorage(storage_path).save([KubeconfigEntry("CP-01", "/tmp/cp-01.yaml")])
+    KubeconfigStorage(storage_path).save(
+        [KubeconfigEntry("CP-01", "/tmp/cp-01.yaml"), KubeconfigEntry("DEV", "/tmp/dev.yaml")]
+    )
     project_root = Path(__file__).resolve().parents[1]
     env = os.environ.copy()
     env["SSHJ_KUBECONFIGS"] = str(storage_path)
-    env["KUBECONFIG"] = "/tmp/original.yaml"
+    env["KUBECONFIG"] = "/tmp/cp-01.yaml"
     result = subprocess.run(
         ["bash", "-c", f'source "{project_root}/shell/sshj.sh"; sshj kc missing; printf "%s" "$KUBECONFIG"'],
         capture_output=True,
         text=True,
         env=env,
     )
-    assert result.stdout == "/tmp/original.yaml"
-    assert "not found" in result.stderr
+    assert result.stdout == "/tmp/cp-01.yaml"
+    assert "Available kubeconfigs" in result.stderr
+    assert "* CP-01 -> /tmp/cp-01.yaml" in result.stderr
+    assert "  DEV -> /tmp/dev.yaml" in result.stderr
+    assert "not found" not in result.stderr
