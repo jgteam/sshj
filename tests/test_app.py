@@ -60,6 +60,16 @@ def test_kubeconfig_tab_create_edit_delete_and_casefold_name(tmp_path) -> None:
             assert kubeconfigs.load()[0].path == "/tmp/updated.yaml"
 
             await pilot.click("#delete_kubeconfig")
+            await pilot.pause()
+            assert kubeconfigs.load() == app.kubeconfigs
+            assert len(app.kubeconfigs) == 1
+
+            await pilot.click("#confirm")
+            await pilot.pause()
+            assert len(app.kubeconfigs) == 1
+
+            await pilot.click("#confirm")
+            await pilot.pause()
             assert kubeconfigs.load() == []
             assert bookmarks.load() == []
 

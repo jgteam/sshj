@@ -4,9 +4,11 @@ import asyncio
 import os
 import shlex
 from pathlib import Path
+from typing import Callable
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Footer,
@@ -30,6 +32,33 @@ from sshj.storage import BookmarkStorage, KubeconfigStorage
 
 
 MANUAL_KEY = "__manual__"
+
+
+class DeleteConfirmationScreen(ModalScreen[bool]):
+    """Require two deliberate confirmations before a destructive action."""
+
+    def __init__(self, item_description: str, final_confirmation: bool = False) -> None:
+        super().__init__()
+        self.item_description = item_description
+        self.final_confirmation = final_confirmation
+
+    def compose(self) -> ComposeResult:
+        title = "Final deletion confirmation" if self.final_confirmation else "Confirm deletion"
+        message = (
+            f"Delete {self.item_description}? This cannot be undone."
+            if self.final_confirmation
+            else f"Are you sure you want to delete {self.item_description}?"
+        )
+        confirm_label = "Delete permanently" if self.final_confirmation else "Continue"
+        with Vertical(id="delete-confirmation"):
+            yield Static(title, classes="section-title")
+            yield Static(message)
+            with Horizontal(classes="button-row"):
+                yield Button("Cancel", id="cancel")
+                yield Button(confirm_label, id="confirm", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "confirm")
 
 
 class SSHJApp(App[Bookmark | None]):
@@ -107,6 +136,18 @@ class SSHJApp(App[Bookmark | None]):
         dock: bottom;
         height: 1;
         padding: 0 1;
+        background: $surface;
+    }
+
+    DeleteConfirmationScreen {
+        align: center middle;
+    }
+
+    #delete-confirmation {
+        width: 60;
+        height: auto;
+        padding: 1 2;
+        border: thick $error;
         background: $surface;
     }
     """
@@ -318,12 +359,24 @@ class SSHJApp(App[Bookmark | None]):
             self._set_status("Select a bookmark to delete.", error=True)
             return
 
-        self.bookmarks.pop(self.selected_index)
+        index = self.selected_index
+        bookmark = self.bookmarks[index]
+        self._request_double_delete_confirmation(
+            f"bookmark '{bookmark.alias or bookmark.connection_target}'",
+            lambda: self._delete_bookmark(index),
+        )
+
+    def _delete_bookmark(self, index: int) -> None:
+        if index < 0 or index >= len(self.bookmarks):
+            self._set_status("Bookmark no longer exists.", error=True)
+            return
+
+        self.bookmarks.pop(index)
         self.storage.save(self.bookmarks)
 
         next_index = None
         if self.bookmarks:
-            next_index = min(self.selected_index, len(self.bookmarks) - 1)
+            next_index = min(index, len(self.bookmarks) - 1)
 
         self._refresh_list(select_index=next_index)
         self._set_status("Bookmark deleted.")
@@ -396,13 +449,47 @@ class SSHJApp(App[Bookmark | None]):
         if self.selected_kubeconfig_index is None:
             self._set_status("Select a kubeconfig to delete.", error=True)
             return
-        self.kubeconfigs.pop(self.selected_kubeconfig_index)
+
+        index = self.selected_kubeconfig_index
+        entry = self.kubeconfigs[index]
+        self._request_double_delete_confirmation(
+            f"kubeconfig '{entry.name}'",
+            lambda: self._delete_kubeconfig(index),
+        )
+
+    def _delete_kubeconfig(self, index: int) -> None:
+        if index < 0 or index >= len(self.kubeconfigs):
+            self._set_status("Kubeconfig no longer exists.", error=True)
+            return
+
+        self.kubeconfigs.pop(index)
         self.kubeconfig_storage.save(self.kubeconfigs)
         next_index = None
         if self.kubeconfigs:
-            next_index = min(self.selected_kubeconfig_index, len(self.kubeconfigs) - 1)
+            next_index = min(index, len(self.kubeconfigs) - 1)
         self._refresh_kubeconfig_list(select_index=next_index)
         self._set_status("Kubeconfig deleted.")
+
+    def _request_double_delete_confirmation(
+        self, item_description: str, on_confirmed: Callable[[], None]
+    ) -> None:
+        def request_final_confirmation(confirmed: bool | None) -> None:
+            if not confirmed:
+                self._set_status("Deletion cancelled.")
+                return
+
+            def delete_if_confirmed(final_confirmed: bool | None) -> None:
+                if final_confirmed:
+                    on_confirmed()
+                else:
+                    self._set_status("Deletion cancelled.")
+
+            self.push_screen(
+                DeleteConfirmationScreen(item_description, final_confirmation=True),
+                delete_if_confirmed,
+            )
+
+        self.push_screen(DeleteConfirmationScreen(item_description), request_final_confirmation)
 
     def _refresh_kubeconfig_list(self, select_index: int | None = None) -> None:
         list_view = self.query_one("#kubeconfig_list", ListView)
