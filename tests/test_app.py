@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
-from textual.widgets import Input, TabbedContent
+from textual.widgets import Input, Static, TabbedContent
 
-from sshj.app import SSHJApp
+from sshj.app import SSHJApp, TunnelStatusScreen
+from sshj.models import Bookmark
 from sshj.storage import BookmarkStorage, KubeconfigStorage
 
 
@@ -26,6 +27,37 @@ def test_save_new_bookmark_without_tunnel(tmp_path) -> None:
             assert app.bookmarks[0].alias == "example"
             assert app.bookmarks[0].local_bind_host is None
             assert storage.load() == app.bookmarks
+
+    asyncio.run(run_test())
+
+
+def test_info_tab_shows_storage_locations_and_tunnel_dialog_is_modal(tmp_path) -> None:
+    async def run_test() -> None:
+        bookmarks = BookmarkStorage(tmp_path / "bookmarks.json")
+        kubeconfigs = KubeconfigStorage(tmp_path / "kubeconfigs.json")
+        app = SSHJApp(bookmarks, kubeconfigs)
+
+        async with app.run_test(size=(120, 90)) as pilot:
+            app.query_one(TabbedContent).active = "info-tab"
+            await pilot.pause()
+            assert str(app.query_one("#bookmark-storage-path", Static).content) == str(bookmarks.path)
+            assert str(app.query_one("#kubeconfig-storage-path", Static).content) == str(kubeconfigs.path)
+
+            app._show_tunnel_status_dialog(
+                Bookmark(
+                    host="bastion.example.com",
+                    tunnel_alias="cluster",
+                    local_bind_host="127.0.0.1",
+                    local_port=6443,
+                    remote_host="k8s.internal",
+                    remote_port=6443,
+                )
+            )
+            await pilot.pause()
+            assert isinstance(app.screen, TunnelStatusScreen)
+            app._hide_tunnel_status_dialog()
+            await pilot.pause()
+            assert not isinstance(app.screen, TunnelStatusScreen)
 
     asyncio.run(run_test())
 

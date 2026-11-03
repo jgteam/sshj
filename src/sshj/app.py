@@ -61,6 +61,28 @@ class DeleteConfirmationScreen(ModalScreen[bool]):
         self.dismiss(event.button.id == "confirm")
 
 
+class TunnelStatusScreen(ModalScreen[None]):
+    """Keep the app focused on an active tunnel until it is stopped."""
+
+    def __init__(self, bookmark: Bookmark) -> None:
+        super().__init__()
+        self.bookmark = bookmark
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="tunnel-status-dialog"):
+            yield Static("Tunnel active", classes="section-title")
+            yield Static(
+                f"{self.bookmark.display_name}\n{self.bookmark.tunnel_spec}\n\n"
+                "Stop the tunnel to return to the app."
+            )
+            yield Button("Stop Tunnel", id="stop_active_tunnel", variant="warning")
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "stop_active_tunnel":
+            event.stop()
+            await self.app.action_stop_tunnel()
+
+
 class SSHJApp(App[Bookmark | None]):
     CSS = """
     Screen {
@@ -150,6 +172,23 @@ class SSHJApp(App[Bookmark | None]):
         border: thick $error;
         background: $surface;
     }
+
+    TunnelStatusScreen {
+        align: center middle;
+    }
+
+    #tunnel-status-dialog {
+        width: 60;
+        height: auto;
+        padding: 1 2;
+        border: thick $success;
+        background: $surface;
+    }
+
+    #tunnel-status-dialog Button {
+        width: 1fr;
+        margin-top: 1;
+    }
     """
 
     BINDINGS = [
@@ -177,6 +216,7 @@ class SSHJApp(App[Bookmark | None]):
         self.selected_kubeconfig_index: int | None = None
         self.active_tunnel: asyncio.subprocess.Process | None = None
         self.tunnel_task: asyncio.Task[None] | None = None
+        self.tunnel_status_screen: TunnelStatusScreen | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -248,6 +288,19 @@ class SSHJApp(App[Bookmark | None]):
                         with Horizontal(classes="button-row"):
                             yield Button("Save", id="save_kubeconfig", variant="primary")
                         yield Static("Use `sshj kc <name>` in a terminal to select it.")
+            with TabPane("Info", id="info-tab"):
+                with VerticalScroll(classes="pane"):
+                    yield Static("Storage and configuration", classes="section-title")
+                    yield Static("SSH bookmarks", classes="subsection-title")
+                    yield Static(str(self.storage.path), id="bookmark-storage-path")
+                    yield Static("Kubeconfig entries", classes="subsection-title")
+                    yield Static(str(self.kubeconfig_storage.path), id="kubeconfig-storage-path")
+                    yield Static("SSH key discovery", classes="subsection-title")
+                    yield Static("~/.ssh/config and ~/.ssh/config.d/*")
+                    yield Static("Storage overrides", classes="subsection-title")
+                    yield Static(
+                        "Set SSHJ_BOOKMARKS or SSHJ_KUBECONFIGS to use different storage files."
+                    )
         yield Static("", id="status")
         yield Footer()
 
@@ -740,6 +793,7 @@ class SSHJApp(App[Bookmark | None]):
         if process.returncode is None:
             self._set_status(f"Tunnel active: {bookmark.tunnel_spec}")
             self._write_log(f"Tunnel active: {bookmark.tunnel_spec}")
+            self._show_tunnel_status_dialog(bookmark)
 
     async def _watch_tunnel(self, process: asyncio.subprocess.Process) -> None:
         tasks = []
@@ -754,6 +808,7 @@ class SSHJApp(App[Bookmark | None]):
 
         if self.active_tunnel is process:
             self.active_tunnel = None
+            self._hide_tunnel_status_dialog()
             self._set_status(f"Tunnel stopped with exit code {return_code}.")
         self._write_log(f"Tunnel stopped with exit code {return_code}.")
 
@@ -765,6 +820,7 @@ class SSHJApp(App[Bookmark | None]):
 
     async def _stop_tunnel(self) -> None:
         if not self.active_tunnel or self.active_tunnel.returncode is not None:
+            self._hide_tunnel_status_dialog()
             self._set_status("No active tunnel to stop.")
             return
 
@@ -776,6 +832,18 @@ class SSHJApp(App[Bookmark | None]):
             self._write_log("Tunnel did not exit after SIGTERM; killing it.")
             self.active_tunnel.kill()
             await self.active_tunnel.wait()
+        self._hide_tunnel_status_dialog()
+
+    def _show_tunnel_status_dialog(self, bookmark: Bookmark) -> None:
+        if self.tunnel_status_screen is None:
+            self.tunnel_status_screen = TunnelStatusScreen(bookmark)
+            self.push_screen(self.tunnel_status_screen)
+
+    def _hide_tunnel_status_dialog(self) -> None:
+        screen = self.tunnel_status_screen
+        self.tunnel_status_screen = None
+        if screen is not None and self.screen is screen:
+            self.pop_screen()
 
     def _write_log(self, message: str) -> None:
         self.query_one("#tunnel-log", RichLog).write(message)
